@@ -2,6 +2,8 @@
 #define _XLCD_TYPES
 
 #define XTOUCH_LCD_MIN_SLEEP_TIME 5
+// This revision has no published OTA channel; SD/USB updates remain available.
+#define XTOUCH_ONLINE_OTA_AVAILABLE 0
 
 #ifdef __cplusplus
 extern "C"
@@ -71,6 +73,9 @@ extern "C"
         int current_layer;
         int total_layers;
         int print_status;
+        bool printer_status_received;
+        char printer_firmware[24];
+        bool native_filament_supported;
         int queue_number;
         int gcode_file_prepare_percent;
         char obj_subtask_id[32];
@@ -119,6 +124,8 @@ extern "C"
         int m_tray_id;  // local tray id : "0" ~ "3"
         int m_tray_now; // tray_now : "0" ~ "15" or "254", "255"
         int m_tray_tar; // tray_tar : "0" ~ "15" or "255"
+        int external_nozzle_temp_min;
+        int external_nozzle_temp_max;
 
     } XTouchBambuStatus;
 
@@ -149,11 +156,22 @@ extern "C"
         bool xTouchOTAEnabled;
         bool xTouchTFTFlip;
         bool xTouchTFTInvert;
-        char xTouchHost[16];
+        /*
+         * The original firmware only accepted a LAN IPv4 address here.
+         * Cloud MQTT uses host names such as us.mqtt.bambulab.com, so keep
+         * enough room for either form (including the terminating NUL).
+         */
+        char xTouchHost[64];
         char xTouchAccessCode[9];
         char xTouchSerialNumber[16];
         char xTouchPrinterModel[32];
         char xTouchPrinterName[32];
+        bool xTouchMqttCloud;
+        uint16_t xTouchMqttPort;
+        char xTouchMqttRegion[16];
+        char xTouchMqttUsername[64];
+        /* Bambu Cloud auth tokens are JWTs and are much longer than an access code. */
+        char xTouchMqttAuthToken[2048];
         int xTouchBacklightLevel;
         int xTouchTFTOFFValue;
         bool xTouchWakeOnPrint;

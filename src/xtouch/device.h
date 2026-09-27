@@ -2,11 +2,17 @@
 #define _XLCD_DEVICE
 
 #include <Arduino.h>
+#include "commands.h"
 
 #define XTOUCH_DEVICE_CONTROL_MOVE_SPEED_XY 3000
 #define XTOUCH_DEVICE_CONTROL_MOVE_SPEED_Z 1500
 
 uint32_t xtouch_device_sequence_id = 0;
+uint32_t xtouch_light_requests = 0;
+uint32_t xtouch_light_sequence = 0;
+bool xtouch_light_last_target = false;
+bool xtouch_light_last_published = false;
+const char *xtouch_light_result = "none";
 
 String xtouch_device_next_sequence()
 {
@@ -18,9 +24,8 @@ String xtouch_device_next_sequence()
 String xtouch_device_print_action(char const *action)
 {
     DynamicJsonDocument json(256);
-    json["print"]["command"] = action;
-    json["print"]["param"] = "";
-    json["print"]["sequence_id"] = xtouch_device_next_sequence();
+    const String sequence = xtouch_device_next_sequence();
+    xtouch_command_print_action(json, action, sequence.c_str());
 
     String result;
     serializeJson(json, result);
@@ -51,10 +56,21 @@ void xtouch_device_set_print_state(String state)
     lastPrintState = state;
 }
 
-void xtouch_device_publish(String request)
+bool xtouch_device_publish(String request)
 {
-    xtouch_pubSubClient.publish(xtouch_mqtt_request_topic.c_str(), request.c_str());
+    if (!xtouch_pubSubClient.connected())
+    {
+        ConsoleDebug.println(F("[XTouch][MQTT] Dropping command while disconnected"));
+        return false;
+    }
+
+    if (!xtouch_pubSubClient.publish(xtouch_mqtt_request_topic.c_str(), request.c_str()))
+    {
+        ConsoleError.println(F("[XTouch][MQTT] Publish failed"));
+        return false;
+    }
     delay(10);
+    return true;
 }
 
 void xtouch_device_get_version()
@@ -71,11 +87,17 @@ void xtouch_device_pushall()
 {
     DynamicJsonDocument json(256);
     json["pushing"]["command"] = "pushall";
-    json["pushing"]["version"] = 1;
-    json["pushing"]["push_target"] = 1;
     json["pushing"]["sequence_id"] = xtouch_device_next_sequence();
-    json["user_id"] = "123456789";
+    String result;
+    serializeJson(json, result);
+    xtouch_device_publish(result);
+}
 
+void xtouch_device_start_push()
+{
+    DynamicJsonDocument json(256);
+    json["pushing"]["command"] = "start";
+    json["pushing"]["sequence_id"] = xtouch_device_next_sequence();
     String result;
     serializeJson(json, result);
     xtouch_device_publish(result);
@@ -96,11 +118,8 @@ void xtouch_device_set_printing_speed(int lvl)
 void xtouch_device_gcode_line(String line)
 {
     DynamicJsonDocument json(line.length() + 256);
-    json["print"]["command"] = "gcode_line";
-    json["print"]["sequence_id"] = xtouch_device_next_sequence();
-    json["print"]["param"] = line.c_str();
-    json["user_id"] = "123456789";
-
+    const String sequence = xtouch_device_next_sequence();
+    xtouch_command_gcode(json, line.c_str(), sequence.c_str());
     String result;
     serializeJson(json, result);
     xtouch_device_publish(result);
@@ -113,24 +132,29 @@ void xtouch_device_move_axis(String axis, double value, int speed)
     xtouch_device_gcode_line(String(cmd));
 }
 
-void xtouch_device_onLightToggleCommand(lv_msg_t *m)
+void xtouch_device_onLightToggleCommand(void *subscription, lv_msg_t *m)
 {
-
+    ++xtouch_light_requests;
     DynamicJsonDocument json(256);
-    json["system"]["command"] = "ledctrl";
-    json["system"]["led_node"] = "chamber_light";
-    json["system"]["sequence_id"] = xtouch_device_next_sequence();
-    json["system"]["led_mode"] = bambuStatus.chamberLed ? "off" : "on";
-    json["system"]["led_on_time"] = 500;
-    json["system"]["led_off_time"] = 500;
-    json["system"]["loop_times"] = 0;
-    json["system"]["interval_time"] = 0;
-    json["user_id"] = "123456789";
-
+    const String sequence = xtouch_device_next_sequence();
+    xtouch_light_sequence = xtouch_device_sequence_id;
+    xtouch_light_last_target = !bambuStatus.chamberLed;
+    xtouch_light_last_published = false;
+    xtouch_light_result = "not_sent";
+    xtouch_command_light(json, xtouch_light_last_target, sequence.c_str());
+    if (json.overflowed())
+    {
+        xtouch_light_result = "encode_failed";
+        return;
+    }
     String result;
     serializeJson(json, result);
-    xtouch_device_publish(result);
-    delay(10);
+    xtouch_light_last_published = xtouch_device_publish(result);
+    xtouch_light_result = xtouch_light_last_published ? "sent" : "publish_failed";
+    ConsoleInfo.printf("[XTouch][LIGHT] request=%u target=%s published=%s mqtt=%d\n",
+                       xtouch_light_requests, xtouch_light_last_target ? "on" : "off",
+                       xtouch_light_last_published ? "yes" : "no", xtouch_pubSubClient.state());
+    if (xtouch_light_last_published) xtouch_device_pushall();
 }
 
 void xtouch_device_onHomeCommand(lv_msg_t *m)
@@ -244,8 +268,30 @@ void xtouch_device_onNozzleDown(lv_msg_t *m)
     xtouch_device_pushall();
 }
 
+void xtouch_device_change_filament(int target, int temperature = 0)
+{
+    DynamicJsonDocument json(384);
+    const String sequence = xtouch_device_next_sequence();
+    if (!xtouch_command_filament(json, target, bambuStatus.m_tray_now, temperature, sequence.c_str())) return;
+    String result;
+    serializeJson(json, result);
+    xtouch_device_publish(result);
+}
+
 void xtouch_device_onLoadFilament(lv_msg_t *m)
 {
+    if (xtouch_bblp_is_p1Series() && bambuStatus.native_filament_supported)
+    {
+        if (!xtouch_can_load_filament()) return;
+        // Match HA: use the external spool profile's temperature midpoint,
+        // or 0 when its material/temperature has not been configured.
+        const int minimum = bambuStatus.external_nozzle_temp_min;
+        const int maximum = bambuStatus.external_nozzle_temp_max;
+        const int temperature = minimum > 0 && maximum >= minimum && maximum <= 300 ?
+                                (minimum + maximum) / 2 : 0;
+        xtouch_device_change_filament(254, temperature);
+        return;
+    }
     if (xtouch_can_load_filament())
     {
         xtouch_device_gcode_line("M620 S254\nM106 S255\nM104 S250\nM17 S\nM17 X0.5 Y0.5\nG91\nG1 Y-5 F1200\nG1 Z3\nG90\nG28 X\nM17 R\nG1 X70 F21000\nG1 Y245\nG1 Y265 F3000\nG4\nM106 S0\nM109 S250\nG1 X90\nG1 Y255\nG1 X120\nG1 X20 Y50 F21000\nG1 Y-3\nT254\nG1 X54\nG1 Y265\nG92 E0\nG1 E40 F180\nG4\nM104 S0\nG1 X70 F15000\nG1 X76\nG1 X65\nG1 X76\nG1 X65\nG1 X90 F3000\nG1 Y255\nG1 X100\nG1 Y265\nG1 X70 F10000\nG1 X100 F5000\nG1 X70 F10000\nG1 X100 F5000\nG1 X165 F12000\nG1 Y245\nG1 X70\nG1 Y265 F3000\nG91\nG1 Z-3 F1200\nG90\nM621 S254\n\n");
@@ -254,6 +300,12 @@ void xtouch_device_onLoadFilament(lv_msg_t *m)
 
 void xtouch_device_onUnloadFilament(lv_msg_t *m)
 {
+    if (!xtouch_can_unload_filament()) return;
+    if (xtouch_bblp_is_p1Series() && bambuStatus.native_filament_supported)
+    {
+        xtouch_device_change_filament(255);
+        return;
+    }
     if (xtouch_bblp_is_x1Series() && !bambuStatus.ams_support_virtual_tray)
     {
 

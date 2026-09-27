@@ -11,6 +11,7 @@ private:
    uint16_t _len;        // Current length of data in the buffer
    uint16_t buffer_size; // Size of the buffer
    char* _buffer;        // Buffer pointer
+   bool _failed;
 
 public:
   // Constructor
@@ -27,6 +28,7 @@ public:
 
   // Get the current length of data in the buffer
   const uint16_t current_length() const { return _len; }
+  bool failed() const { return _failed; }
 
   // Stream-related methods
   bool listen() { return true; }
@@ -41,14 +43,13 @@ public:
   virtual void flush();
 
   // Get the buffer pointer
-  const char* get_buffer() const { return _buffer; }
+  const char* get_buffer() const { return _buffer ? _buffer : ""; }
   bool includes(const char* target);
 
   // Get the buffer as a null-terminated string
   const char* get_string() const { 
     // Null terminate
-    _buffer[_len] = '\0';
-    return _buffer;
+    return get_buffer();
   }
 
   using Print::write; // Allow write methods from the Print class

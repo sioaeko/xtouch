@@ -1,25 +1,19 @@
 #include <Arduino.h>
 #include "types.h"
+#include "filament_state.h"
 
 void xtouch_ams_parse_tray_now(const char *tray_now)
 {
-    if (strlen(tray_now) == 0)
+    if (tray_now == NULL || strlen(tray_now) == 0)
     {
         return;
     }
     else
     {
-        int tray_now_int = atoi(tray_now);
-        if (tray_now_int >= 0 && tray_now_int < 16)
-        {
-            bambuStatus.m_ams_id = tray_now_int >> 2;
-            bambuStatus.m_tray_id = tray_now_int & 0x3;
-        }
-        else if (tray_now_int == 255)
-        {
-            bambuStatus.m_ams_id = 0;
-            bambuStatus.m_tray_id = 0;
-        }
+        char *end;
+        const long tray = strtol(tray_now, &end, 10);
+        if (*end == '\0' && tray >= 0 && tray <= 255)
+            xtouch_filament_set_tray(&bambuStatus, (int)tray);
     }
 }
 
@@ -65,26 +59,10 @@ bool xtouch_has_ams() { return bambuStatus.ams_exist_bits != 0; }
 
 bool xtouch_can_load_filament()
 {
-    bool result = false;
-    if (!xtouch_has_ams())
-        return true;
-
-    if (bambuStatus.ams_status_main == AMS_STATUS_MAIN_IDLE && bambuStatus.hw_switch_state == 1 && bambuStatus.m_tray_now == 255)
-    {
-        return true;
-    }
-    return result;
+    return xtouch_filament_can_load(&bambuStatus);
 }
 
 bool xtouch_can_unload_filament()
 {
-    bool result = false;
-    if (!xtouch_has_ams())
-        return true;
-
-    if (bambuStatus.ams_status_main == AMS_STATUS_MAIN_IDLE && bambuStatus.hw_switch_state == 1 && bambuStatus.m_tray_now == 255)
-    {
-        return true;
-    }
-    return result;
+    return xtouch_filament_can_unload(&bambuStatus);
 }

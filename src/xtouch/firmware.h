@@ -74,6 +74,7 @@ bool xtouch_firmware_semverNeedsUpdate(const char *compare)
 void xtouch_firmware_onProgress(size_t currSize, size_t totalSize)
 {
     int16_t progress = (currSize * 100) / totalSize;
+    if (!introScreenCaption) return; // Optional SD update runs before the LCD owns VSPI.
     lv_label_set_text_fmt(introScreenCaption, LV_SYMBOL_CHARGE " Updating %d%%", progress);
     lv_timer_handler();
     lv_task_handler();
@@ -81,7 +82,7 @@ void xtouch_firmware_onProgress(size_t currSize, size_t totalSize)
 
 void xtouch_firmware_checkOnlineFirmwareUpdate(void)
 {
-    if (!xTouchConfig.xTouchOTAEnabled)
+    if (!XTOUCH_ONLINE_OTA_AVAILABLE || !xTouchConfig.xTouchOTAEnabled)
     {
         return;
     }
@@ -196,13 +197,14 @@ void xtouch_firmware_checkFirmwareUpdate(void)
         bool updateSucceeded = Update.end();
         firmware.close();
 
-        if (updateSucceeded)
+        ConsoleInfo.printf("[XTouch][UPDATE] SD update %s\n", updateSucceeded ? "finished" : "failed");
+        if (updateSucceeded && introScreenCaption)
         {
             lv_label_set_text(introScreenCaption, LV_SYMBOL_OK " Update finished");
             lv_timer_handler();
             lv_task_handler();
         }
-        else
+        else if (introScreenCaption)
         {
             lv_label_set_text(introScreenCaption, LV_SYMBOL_WARNING " Update error");
             lv_timer_handler();

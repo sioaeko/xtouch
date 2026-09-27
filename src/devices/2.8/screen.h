@@ -144,10 +144,15 @@ void xtouch_screen_dispFlush(lv_disp_drv_t *disp, const lv_area_t *area, lv_colo
 
 void xtouch_screen_touchRead(lv_indev_drv_t *indev_driver, lv_indev_data_t *data)
 {
+    if (!xtouch_touch_ready)
+    {
+        data->state = LV_INDEV_STATE_REL;
+        return;
+    }
 
     if (x_touch_touchScreen.tirqTouched() && x_touch_touchScreen.touched())
     {
-        lv_timer_reset(xtouch_screen_onScreenOffTimer);
+        if (xtouch_screen_onScreenOffTimer) lv_timer_reset(xtouch_screen_onScreenOffTimer);
         // dont pass first touch after power on
         if (xtouch_screen_touchFromPowerOff)
         {
@@ -174,6 +179,10 @@ void xtouch_screen_setup()
 {
 
     ConsoleInfo.println("[XTouch][SCREEN] Setup");
+    static_assert(TFT_MOSI == 13 && TFT_SCLK == 14 && TFT_CS == 15 && TFT_DC == 2,
+                  "CYD display wiring must be applied to every compilation unit");
+    ConsoleInfo.printf("[XTouch][SCREEN] CYD ILI9341: MOSI=%d CLK=%d CS=%d DC=%d RST=%d\n",
+                       TFT_MOSI, TFT_SCLK, TFT_CS, TFT_DC, TFT_RST);
     pinMode(XPT2046_CS, OUTPUT);
     pinMode(TFT_CS, OUTPUT);
     pinMode(SD_CS, OUTPUT);

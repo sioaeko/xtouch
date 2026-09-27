@@ -41,7 +41,7 @@ void ui_introScreen_screen_init()
     lv_obj_set_y(introScreenIconGreen, 0);
 
     introScreenCaption = lv_label_create(introScreen);
-    lv_obj_set_width(introScreenCaption, LV_SIZE_CONTENT);  /// 100
+    lv_obj_set_width(introScreenCaption, 300);
     lv_obj_set_height(introScreenCaption, LV_SIZE_CONTENT); /// 100
     lv_label_set_text(introScreenCaption, LV_SYMBOL_SD_CARD);
     lv_obj_clear_flag(introScreenCaption, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN); /// Flags

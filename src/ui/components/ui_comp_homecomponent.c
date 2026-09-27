@@ -56,7 +56,8 @@ void ui_event_comp_homeComponent_mainScreenLightButton(lv_event_t *e)
     if (event_code == LV_EVENT_CLICKED)
     {
         onHomeLight(e);
-        _ui_state_modify(comp_homeComponent[UI_COMP_HOMECOMPONENT_MAINSCREENRIGHT_MAINSCREENLIGHTBUTTON], LV_STATE_CHECKED, _UI_MODIFY_STATE_TOGGLE);
+        // The printer's lights_report updates the checked state. A local
+        // click or a successful socket write is not command execution.
     }
 }
 void ui_event_comp_homeComponent_mainScreenBedTemp(lv_event_t *e)
@@ -223,6 +224,8 @@ int printingLevelToIndex(int lvl)
         return 2;
     case XTOUCH_SPEED_LEVEL_RAMPAGE:
         return 3;
+    default:
+        return 1;
     }
 }
 

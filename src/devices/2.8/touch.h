@@ -12,6 +12,17 @@
 SPIClass x_touch_spi = SPIClass(HSPI);
 XPT2046_Touchscreen x_touch_touchScreen(XPT2046_CS, XPT2046_IRQ);
 XTouchPanelConfig x_touch_touchConfig;
+bool xtouch_touch_ready = false;
+void xtouch_webserver_loop();
+
+void xtouch_touch_wait(bool pressed)
+{
+    while (x_touch_touchScreen.touched() == pressed)
+    {
+        xtouch_webserver_loop();
+        delay(5);
+    }
+}
 
 class ScreenPoint
 {
@@ -49,7 +60,7 @@ ScreenPoint getScreenCoords(int16_t x, int16_t y)
 void xtouch_loadTouchConfig(XTouchPanelConfig &config)
 {
     // Open file for reading
-    File file = xtouch_filesystem_open(SD, xtouch_paths_touch);
+    File file = xtouch_filesystem_open(SPIFFS, xtouch_paths_touch);
 
     // Allocate a temporary JsonDocument
     // Don't forget to change the capacity to match your requirements.
@@ -76,13 +87,13 @@ void xtouch_saveTouchConfig(XTouchPanelConfig &config)
     doc["yCalM"] = config.yCalM;
     doc["xCalC"] = config.xCalC;
     doc["yCalC"] = config.yCalC;
-    xtouch_filesystem_writeJson(SD, xtouch_paths_touch, doc);
+    xtouch_filesystem_writeJson(SPIFFS, xtouch_paths_touch, doc);
 }
 
 void xtouch_resetTouchConfig()
 {
     ConsoleInfo.println(F("[XTouch][FS] Resetting touch config"));
-    xtouch_filesystem_deleteFile(SD, xtouch_paths_touch);
+    xtouch_filesystem_deleteFile(SPIFFS, xtouch_paths_touch);
     delay(500);
     ESP.restart();
 }
@@ -90,7 +101,7 @@ void xtouch_resetTouchConfig()
 bool hasTouchConfig()
 {
     ConsoleInfo.println(F("[XTouch][FS] Checking for touch config"));
-    return xtouch_filesystem_exist(SD, xtouch_paths_touch);
+    return xtouch_filesystem_exist(SPIFFS, xtouch_paths_touch);
 }
 
 void xtouch_touch_setup()
@@ -110,12 +121,10 @@ void xtouch_touch_setup()
         lv_timer_handler();
 
         // wait for no touch
-        while (x_touch_touchScreen.touched())
-            ;
+        xtouch_touch_wait(true);
         tft.drawFastHLine(0, 10, 20, ILI9341_WHITE);
         tft.drawFastVLine(10, 0, 20, ILI9341_WHITE);
-        while (!x_touch_touchScreen.touched())
-            ;
+        xtouch_touch_wait(false);
         delay(50);
         p = x_touch_touchScreen.getPoint();
         x1 = p.x;
@@ -124,13 +133,11 @@ void xtouch_touch_setup()
         tft.drawFastVLine(10, 0, 20, ILI9341_BLACK);
         delay(500);
 
-        while (x_touch_touchScreen.touched())
-            ;
+        xtouch_touch_wait(true);
         tft.drawFastHLine(300, 230, 20, ILI9341_WHITE);
         tft.drawFastVLine(310, 220, 20, ILI9341_WHITE);
 
-        while (!x_touch_touchScreen.touched())
-            ;
+        xtouch_touch_wait(false);
         delay(50);
         p = x_touch_touchScreen.getPoint();
         x2 = p.x;
@@ -138,19 +145,26 @@ void xtouch_touch_setup()
         tft.drawFastHLine(300, 230, 20, ILI9341_BLACK);
         tft.drawFastVLine(310, 220, 20, ILI9341_BLACK);
 
-        int16_t xDist = 320 - 40;
-        int16_t yDist = 240 - 40;
+        if (abs(x2 - x1) < 100 || abs(y2 - y1) < 100)
+        {
+            ConsoleError.println("[XTouch][TOUCH] Invalid calibration; restarting");
+            delay(500);
+            ESP.restart();
+        }
+        int16_t xDist = 300;
+        int16_t yDist = 220;
 
         x_touch_touchConfig.xCalM = (float)xDist / (float)(x2 - x1);
-        x_touch_touchConfig.xCalC = 20.0 - ((float)x1 * x_touch_touchConfig.xCalM);
+        x_touch_touchConfig.xCalC = 10.0 - ((float)x1 * x_touch_touchConfig.xCalM);
         // y
         x_touch_touchConfig.yCalM = (float)yDist / (float)(y2 - y1);
-        x_touch_touchConfig.yCalC = 20.0 - ((float)y1 * x_touch_touchConfig.yCalM);
+        x_touch_touchConfig.yCalC = 10.0 - ((float)y1 * x_touch_touchConfig.yCalM);
 
         xtouch_saveTouchConfig(x_touch_touchConfig);
 
         loadScreen(-1);
     }
+    xtouch_touch_ready = true;
 }
 
 #endif

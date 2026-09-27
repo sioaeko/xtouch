@@ -278,6 +278,7 @@
       </svg>
       <div>
         <form class="mb-4">
+          <p class="text-dark">P1S Cloud setup. Save xtouch.json to the SD card, or send it when the screen shows ?Provision at?.</p>
           <div class="form-group">
             <label for="ssid" class="text-dark">SSID</label>
             <input
@@ -292,7 +293,7 @@
           <div class="form-group">
             <label for="password" class="text-dark">SSID Password</label>
             <input
-              type="text"
+              type="password"
               id="password"
               name="password"
               placeholder="Enter your SSID password"
@@ -301,25 +302,74 @@
             <small id="password-error" class="text-danger"></small>
           </div>
 
+          <div class="form-group">
+            <label for="serialNumber" class="text-dark">Printer serial number</label>
+            <input
+              type="text"
+              id="serialNumber"
+              name="serialNumber"
+              placeholder="Example: 01S00C342600288"
+              class="form-control form-control-custom"
+              autocomplete="off"
+            />
+            <small id="serialNumber-error" class="text-danger"></small>
+          </div>
+
+          <div class="form-group">
+            <label for="printerModel" class="text-dark">Printer model</label>
+            <input
+              type="text"
+              id="printerModel"
+              name="printerModel"
+              placeholder="Example: P1P, P1S, X1, or X1C"
+              value="P1S"
+              class="form-control form-control-custom"
+              autocomplete="off"
+            />
+            <small id="printerModel-error" class="text-danger"></small>
+          </div>
+
+          <div class="form-group">
+            <label for="cloudRegion" class="text-dark">Bambu account region</label>
+            <select id="cloudRegion" class="form-control form-control-custom">
+              <option value="Global">Global</option>
+              <option value="China">China</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="cloudUsername" class="text-dark">Cloud MQTT username</label>
+            <input type="text" id="cloudUsername" name="cloudUsername"
+              class="form-control form-control-custom" placeholder="u_123456789" autocomplete="off" />
+            <small id="cloudUsername-error" class="text-danger"></small>
+          </div>
+          <div class="form-group">
+            <label for="cloudToken" class="text-dark">Cloud authentication token</label>
+            <input type="password" id="cloudToken" name="cloudToken"
+              class="form-control form-control-custom" placeholder="Paste the token used by ha-bambulab" autocomplete="off" />
+            <small id="cloudToken-error" class="text-danger"></small>
+            <small class="d-block text-dark">Use the ha-bambulab username and auth_token. The token stays in this popup until you download or send the configuration.</small>
+          </div>
+          <button id="readCloudLogin" type="button" class="btn btn-custom btn-block mb-3">Read login from current Bambu tab</button>
+          <small id="cloud-status" class="d-block text-dark" role="status"></small>
+
           <button
             id="downloadJson"
             class="btn btn-custom btn-block font-weight-bold mb-3"
-            style="display: none"
             type="button"
           >
-            Download provisioning file
+            Download xtouch.json
           </button>
 
           <div id="provisionDevice">
             <div class="form-group">
-              <label for="ip" class="text-dark">Xtouch Lite IP</label>
+              <label for="ip" class="text-dark">CYD IP (only for network provisioning)</label>
               <input
                 type="text"
                 id="ip"
                 name="ip"
                 placeholder="Enter your Xtouch Lite IP"
                 class="form-control form-control-custom"
-                value="0.0.0.0"
+                value=""
               />
               <small id="ip-error" class="text-danger"></small>
             </div>

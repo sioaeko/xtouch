@@ -1,0 +1,12 @@
+{
+  "ssid": "YOUR_2.4GHZ_WIFI",
+  "pwd": "YOUR_WIFI_PASSWORD",
+  "mqtt": {
+    "mode": "cloud",
+    "region": "Global",
+    "username": "u_YOUR_BAMBU_UID",
+    "authToken": "YOUR_HA_BAMBULAB_AUTH_TOKEN",
+    "serialNumber": "YOUR_P1S_SERIAL",
+    "printerModel": "P1S"
+  }
+}

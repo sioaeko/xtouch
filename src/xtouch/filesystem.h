@@ -1,8 +1,9 @@
-#ifndef _XLCD_SD
-#define _XLCD_SD
+#ifndef _XLCD_FILESYSTEM
+#define _XLCD_FILESYSTEM
 
 #include "FS.h"
 #include "SD.h"
+#include "SPIFFS.h"
 #include <ArduinoJson.h>
 #include <Arduino.h>
 
@@ -23,7 +24,7 @@ bool xtouch_filesystem_deleteFile(fs::FS &fs, const char *path)
 
 bool xtouch_filesystem_mkdir(fs::FS &fs, const char *path)
 {
-    if (!xtouch_filesystem_exist(SD, path))
+    if (!xtouch_filesystem_exist(fs, path))
     {
         return fs.mkdir(path);
     }
@@ -37,12 +38,12 @@ bool xtouch_filesystem_rmdir(fs::FS &fs, const char *path)
 
 void xtouch_filesystem_writeJson(fs::FS &fs, const char *filename, DynamicJsonDocument json, bool defaultsToArray = false, int size = 1024)
 {
-    ConsoleDebug.print(F("[XTouch][SD] Writting JSON file: "));
+    ConsoleDebug.print(F("[XTouch][FS] Writting JSON file: "));
     ConsoleDebug.println(filename);
     File configFile = fs.open(filename, FILE_WRITE);
     if (!configFile)
     {
-        ConsoleError.print(F("[XTouch][SD] Failed to write json file: "));
+        ConsoleError.print(F("[XTouch][FS] Failed to write json file: "));
         ConsoleError.println(filename);
         return;
     }
@@ -53,13 +54,13 @@ void xtouch_filesystem_writeJson(fs::FS &fs, const char *filename, DynamicJsonDo
 
 DynamicJsonDocument xtouch_filesystem_readJson(fs::FS &fs, const char *filename, bool defaultsToArray = false, int size = 1024)
 {
-    ConsoleDebug.print(F("[XTouch][SD] Reading JSON file: "));
+    ConsoleDebug.print(F("[XTouch][FS] Reading JSON file: "));
     ConsoleDebug.println(filename);
     DynamicJsonDocument doc(size); // Adjust the size as needed
 
     if (!fs.exists(filename))
     {
-        ConsoleError.print(F("[XTouch][SD] Error Reading JSON File: "));
+        ConsoleError.print(F("[XTouch][FS] Error Reading JSON File: "));
         ConsoleError.println(filename);
         if (defaultsToArray)
         {
@@ -76,8 +77,9 @@ DynamicJsonDocument xtouch_filesystem_readJson(fs::FS &fs, const char *filename,
 
     if (error)
     {
-        ConsoleError.print(F("[XTouch][SD] Error Parsing JSON File: "));
+        ConsoleError.print(F("[XTouch][FS] Error Parsing JSON File: "));
         ConsoleError.println(filename);
+        doc.clear();
     }
 
     configFile.close();

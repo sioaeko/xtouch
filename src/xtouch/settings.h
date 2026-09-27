@@ -14,12 +14,12 @@ void xtouch_settings_save(bool onlyRoot = false)
     doc["auxFan"] = xTouchConfig.xTouchAuxFanEnabled;
     doc["chamberFan"] = xTouchConfig.xTouchChamberFanEnabled;
 
-    xtouch_filesystem_writeJson(SD, xtouch_paths_settings, doc);
+    xtouch_filesystem_writeJson(SPIFFS, xtouch_paths_settings, doc);
 }
 
 void xtouch_settings_loadSettings()
 {
-    if (!xtouch_filesystem_exist(SD, xtouch_paths_settings))
+    if (!xtouch_filesystem_exist(SPIFFS, xtouch_paths_settings))
     {
         DynamicJsonDocument doc(256);
         xTouchConfig.xTouchBacklightLevel = 128;
@@ -34,7 +34,7 @@ void xtouch_settings_loadSettings()
         xtouch_settings_save(true);
     }
 
-    DynamicJsonDocument settings = xtouch_filesystem_readJson(SD, xtouch_paths_settings);
+    DynamicJsonDocument settings = xtouch_filesystem_readJson(SPIFFS, xtouch_paths_settings);
 
     xTouchConfig.xTouchBacklightLevel = settings.containsKey("backlight") ? settings["backlight"].as<int>() : 128;
     xTouchConfig.xTouchTFTOFFValue = settings.containsKey("tftOff") ? settings["tftOff"].as<int>() : 15;

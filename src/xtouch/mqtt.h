@@ -5,9 +5,15 @@
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <mbedtls/base64.h>
+#include <string.h>
+#include <time.h>
 #include "ui/ui_msgs.h"
 #include "types.h"
 #include "autogrowstream.h"
+#include "report_filter.h"
+#include "ams_report.h"
+#include "light_report.h"
 #include "bbl-certs.h"
 // #include "xtouch/ams-status.hpp"
 
@@ -22,14 +28,17 @@ String xtouch_mqtt_report_topic;
 #include "config.h"
 
 #define XTOUCH_MQTT_SERVER_TIMEOUT 20
-#define XTOUCH_MQTT_SERVER_PUSH_STATUS_TIMEOUT 15
+#define XTOUCH_MQTT_SERVER_PUSH_STATUS_TIMEOUT 60
 #define XTOUCH_MQTT_SERVER_JSON_PARSE_SIZE 8192
 
 /* ---------------------------------------------- */
 bool xtouch_mqtt_firstConnectionDone = false;
-int xtouch_mqtt_connection_timeout_count = 5;
-int xtouch_mqtt_connection_fail_count = 5;
-unsigned long long xtouch_mqtt_lastPushStatus = 0;
+unsigned long xtouch_mqtt_lastPushStatus = 0;
+bool xtouch_mqtt_needs_provisioning = false;
+bool xtouch_mqtt_refresh_requested = false;
+void xtouch_mqtt_onMqttReady();
+uint32_t xtouch_mqtt_reconnect_delay = 1000;
+unsigned long xtouch_mqtt_next_connect_at = 0;
 
 XtouchAutoGrowBufferStream stream;
 
@@ -42,7 +51,6 @@ void xtouch_mqtt_sendMsg(XTOUCH_MESSAGE message, unsigned long long data = 0)
 
 void xtouch_mqtt_topic_setup()
 {
-    DynamicJsonDocument mqttConfig = xtouch_load_config();
     String xtouch_device_topic = String("device/") + xTouchConfig.xTouchSerialNumber;
     xtouch_mqtt_request_topic = xtouch_device_topic + String("/request");
     xtouch_mqtt_report_topic = xtouch_device_topic + String("/report");
@@ -71,14 +79,17 @@ String xtouch_mqtt_parse_printer_type(String type_str)
 
 void xtouch_mqtt_update_slice_info(const char *project_id, const char *profile_id, const char *subtask_id, int plate_idx)
 {
-    strcpy(bambuStatus.project_id_, project_id);
-    strcpy(bambuStatus.profile_id_, profile_id);
-    strcpy(bambuStatus.subtask_id_, subtask_id);
+    xtouch_config_copy(bambuStatus.project_id_, sizeof(bambuStatus.project_id_), project_id);
+    xtouch_config_copy(bambuStatus.profile_id_, sizeof(bambuStatus.profile_id_), profile_id);
+    xtouch_config_copy(bambuStatus.subtask_id_, sizeof(bambuStatus.subtask_id_), subtask_id);
 }
 
 void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
 {
     xtouch_mqtt_lastPushStatus = millis();
+    xtouch_mqtt_refresh_requested = false;
+    bambuStatus.printer_status_received = true;
+    xtouch_mqtt_onMqttReady();
     ConsoleDebug.println(F("[XTouch][MQTT] ProcessPushStatus"));
 
     if (incomingJson != NULL && incomingJson.containsKey("print"))
@@ -87,11 +98,11 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
 
         if (incomingJson["print"].containsKey("print_type"))
         {
-            strcpy(bambuStatus.print_type, incomingJson["print"]["print_type"]);
+            xtouch_config_copy(bambuStatus.print_type, sizeof(bambuStatus.print_type), incomingJson["print"]["print_type"]);
         }
         if (incomingJson["print"].containsKey("home_flag"))
         {
-            bambuStatus.home_flag, incomingJson["print"]["home_flag"].as<int>();
+            bambuStatus.home_flag = incomingJson["print"]["home_flag"].as<int>();
         }
 
         if (incomingJson["print"].containsKey("hw_switch_state"))
@@ -176,12 +187,12 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
         // #pragma region print_task
         if (incomingJson["print"].containsKey("printer_type"))
         {
-            strcpy(bambuStatus.printer_type, xtouch_mqtt_parse_printer_type(incomingJson["print"]["printer_type"].as<String>()).c_str());
+            xtouch_config_copy(bambuStatus.printer_type, sizeof(bambuStatus.printer_type), xtouch_mqtt_parse_printer_type(incomingJson["print"]["printer_type"].as<String>()).c_str());
         }
 
         if (incomingJson["print"].containsKey("subtask_name"))
         {
-            strcpy(bambuStatus.subtask_name, incomingJson["print"]["subtask_name"]);
+            xtouch_config_copy(bambuStatus.subtask_name, sizeof(bambuStatus.subtask_name), incomingJson["print"]["subtask_name"]);
         }
 
         if (incomingJson["print"].containsKey("layer_num"))
@@ -206,12 +217,12 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
 
         if (incomingJson["print"].containsKey("task_id"))
         {
-            strcpy(bambuStatus.task_id, incomingJson["print"]["task_id"]);
+            xtouch_config_copy(bambuStatus.task_id, sizeof(bambuStatus.task_id), incomingJson["print"]["task_id"]);
         }
 
         if (incomingJson["print"].containsKey("gcode_file"))
         {
-            strcpy(bambuStatus.gcode_file, incomingJson["print"]["gcode_file"]);
+            xtouch_config_copy(bambuStatus.gcode_file, sizeof(bambuStatus.gcode_file), incomingJson["print"]["gcode_file"]);
         }
 
         if (incomingJson["print"].containsKey("gcode_file_prepare_percent"))
@@ -226,7 +237,7 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
         if (incomingJson["print"].containsKey("project_id") && incomingJson["print"].containsKey("profile_id") && incomingJson["print"].containsKey("subtask_id"))
         {
             String obj_subtask_id_string = incomingJson["print"]["subtask_id"].as<String>();
-            strcpy(bambuStatus.obj_subtask_id, obj_subtask_id_string.c_str());
+            xtouch_config_copy(bambuStatus.obj_subtask_id, sizeof(bambuStatus.obj_subtask_id), obj_subtask_id_string.c_str());
 
             int plate_index = -1;
             /* parse local plate_index from task */
@@ -235,20 +246,20 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
                 if (incomingJson["print"].containsKey("gcode_file"))
                 {
                     String gcode_file_string = incomingJson["print"]["gcode_file"].as<String>();
-                    strcpy(bambuStatus.gcode_file, incomingJson["print"]["gcode_file"]);
+                    xtouch_config_copy(bambuStatus.gcode_file, sizeof(bambuStatus.gcode_file), incomingJson["print"]["gcode_file"]);
 
                     int idx_start = gcode_file_string.lastIndexOf("_") + 1;
                     int idx_end = gcode_file_string.lastIndexOf(".");
                     if (idx_start > 0 && idx_end > idx_start)
                     {
-                        plate_index = atoi(gcode_file_string.substring(idx_start, idx_end - idx_start).c_str());
+                        plate_index = atoi(gcode_file_string.substring(idx_start, idx_end).c_str());
                         bambuStatus.plate_index = plate_index;
                     }
                 }
             }
             xtouch_mqtt_update_slice_info(incomingJson["print"]["project_id"], incomingJson["print"]["profile_id"], incomingJson["print"]["subtask_id"], plate_index);
 
-            strcpy(bambuStatus.task_id, incomingJson["print"]["subtask_id"]);
+            xtouch_config_copy(bambuStatus.task_id, sizeof(bambuStatus.task_id), incomingJson["print"]["subtask_id"]);
         }
         // #pragma region print_task
 
@@ -354,19 +365,12 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
         if (incomingJson["print"].containsKey("lights_report"))
         {
 
-            if (incomingJson["print"]["lights_report"][0].containsKey("mode"))
+            if (xtouch_light_report(incomingJson["print"]["lights_report"].as<JsonArrayConst>(), bambuStatus.chamberLed))
             {
                 XTOUCH_MESSAGE_DATA eventData;
-                if (incomingJson["print"]["lights_report"][0]["mode"] == "on")
-                {
-                    bambuStatus.chamberLed = true;
-                    eventData.data = 1;
-                }
-                else
-                {
-                    bambuStatus.chamberLed = false;
-                    eventData.data = 0;
-                }
+                eventData.data = bambuStatus.chamberLed ? 1 : 0;
+                if (xtouch_light_last_published && bambuStatus.chamberLed == xtouch_light_last_target)
+                    xtouch_light_result = "state_confirmed";
                 lv_msg_send(XTOUCH_ON_LIGHT_REPORT, &eventData);
             }
         }
@@ -468,127 +472,19 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
 
         // #pragma endregion
 
-        // #pragma region push_ams
-        if (incomingJson["print"].containsKey("ams"))
+        // Update AMS metadata even when the report contains only tray_now or
+        // ams_status. A full tray inventory is not required for these deltas.
+        JsonObjectConst report = incomingJson["print"];
+        xtouch_update_ams_report(bambuStatus, report);
+        if (report.containsKey("ams"))
+            xtouch_mqtt_sendMsg(XTOUCH_ON_AMS, bambuStatus.ams ? 1 : 0);
+        if (report.containsKey("ams") || report.containsKey("ams_status") ||
+            report.containsKey("hw_switch_state") || report.containsKey("gcode_state") ||
+            report.containsKey("vt_tray"))
         {
-            // amsStatus.processAmsStatus(incomingJson["print"].as<JsonObject>());
-
-            if (incomingJson["ams"].containsKey("ams_exist_bits"))
-            {
-                bambuStatus.ams_exist_bits = incomingJson["ams"]["ams_exist_bits"].as<String>().toInt();
-            }
-
-            if (incomingJson.containsKey("ams_status"))
-            {
-                int ams_status = incomingJson["ams_status"].as<int>();
-                xtouch_ams_parse_status(ams_status);
-            }
-
-            if (incomingJson["print"]["ams"].containsKey("ams"))
-            {
-
-                JsonArray array = incomingJson["print"]["ams"]["ams"].as<JsonArray>();
-                bambuStatus.ams = array.size() > 0;
-                xtouch_mqtt_sendMsg(XTOUCH_ON_AMS, array.size() > 0 ? 1 : 0);
-
-                long int last_ams_exist_bits = bambuStatus.ams_exist_bits;
-                long int last_tray_exist_bits = bambuStatus.tray_exist_bits;
-                long int last_is_bbl_bits = bambuStatus.tray_is_bbl_bits;
-                long int last_read_done_bits = bambuStatus.tray_read_done_bits;
-                long int last_ams_version = bambuStatus.ams_version;
-
-                if (incomingJson["ams"].containsKey("ams_exist_bits"))
-                {
-                    bambuStatus.ams_exist_bits = incomingJson["ams"]["ams_exist_bits"].as<String>().toInt();
-                }
-                if (incomingJson["ams"].containsKey("tray_exist_bits"))
-                {
-                    bambuStatus.tray_exist_bits = incomingJson["ams"]["tray_exist_bits"].as<String>().toInt();
-                }
-                if (incomingJson["ams"].containsKey("tray_read_done_bits"))
-                {
-                    bambuStatus.tray_read_done_bits = incomingJson["ams"]["tray_read_done_bits"].as<String>().toInt();
-                }
-                if (incomingJson["ams"].containsKey("tray_reading_bits"))
-                {
-                    bambuStatus.tray_reading_bits = incomingJson["ams"]["tray_reading_bits"].as<String>().toInt();
-                    bambuStatus.ams_support_use_ams = true;
-                }
-                if (incomingJson["ams"].containsKey("tray_is_bbl_bits"))
-                {
-                    bambuStatus.tray_is_bbl_bits = incomingJson["ams"]["tray_is_bbl_bits"].as<String>().toInt();
-                }
-                if (incomingJson["ams"].containsKey("version"))
-                {
-                    if (incomingJson["ams"]["version"].is<int>())
-                    {
-
-                        bambuStatus.ams_version = incomingJson["ams"]["version"].as<int>();
-                    }
-                }
-                if (incomingJson["ams"].containsKey("tray_now"))
-                {
-                    xtouch_ams_parse_tray_now(incomingJson["ams"]["tray_now"]);
-                }
-                if (incomingJson["ams"].containsKey("tray_tar"))
-                {
-                    bambuStatus.m_tray_tar = incomingJson["ams"]["tray_tar"].as<int>();
-                }
-                if (incomingJson["ams"].containsKey("ams_rfid_status"))
-                {
-                    bambuStatus.ams_rfid_status = incomingJson["ams"]["ams_rfid_status"].as<int>();
-                }
-
-                if (incomingJson["ams"].containsKey("humidity"))
-                {
-                    if (incomingJson["ams"]["humidity"].is<String>())
-                    {
-                        String humidity_str = incomingJson["ams"]["humidity"].as<String>();
-
-                        bambuStatus.ams_humidity = atoi(humidity_str.c_str());
-                    }
-                }
-                if (incomingJson["ams"].containsKey("insert_flag") || incomingJson["ams"].containsKey("power_on_flag") || incomingJson["ams"].containsKey("calibrate_remain_flag"))
-                {
-                    if (bambuStatus.ams_user_setting_hold_count > 0)
-                    {
-                        bambuStatus.ams_user_setting_hold_count--;
-                    }
-                    else
-                    {
-                        if (incomingJson["ams"].containsKey("insert_flag"))
-                        {
-                            bambuStatus.ams_insert_flag = incomingJson["ams"]["insert_flag"].as<bool>();
-                        }
-                        if (incomingJson["ams"].containsKey("power_on_flag"))
-                        {
-                            bambuStatus.ams_power_on_flag = incomingJson["ams"]["power_on_flag"].as<bool>();
-                        }
-                        if (incomingJson["ams"].containsKey("calibrate_remain_flag"))
-                        {
-                            bambuStatus.ams_calibrate_remain_flag = incomingJson["ams"]["calibrate_remain_flag"].as<bool>();
-                        }
-                    }
-                }
-
-                if (bambuStatus.ams_exist_bits != last_ams_exist_bits || last_tray_exist_bits != last_tray_exist_bits || bambuStatus.tray_is_bbl_bits != last_is_bbl_bits || bambuStatus.tray_read_done_bits != last_read_done_bits || last_ams_version != bambuStatus.ams_version)
-                {
-                    bambuStatus.is_ams_need_update = true;
-                    xtouch_mqtt_sendMsg(XTOUCH_ON_AMS_BITS, 0);
-                }
-            }
+            bambuStatus.is_ams_need_update = true;
+            xtouch_mqtt_sendMsg(XTOUCH_ON_AMS_BITS, 0);
         }
-
-        // vt_tray
-        if (incomingJson["print"].containsKey("vt_tray"))
-        {
-            bambuStatus.ams_support_virtual_tray = true;
-        }
-        else
-        {
-            bambuStatus.ams_support_virtual_tray = false;
-        }
-        // #pragma endregion
 
         if (incomingJson["print"].containsKey("gcode_state") ||
             incomingJson["print"].containsKey("layer_num") ||
@@ -604,27 +500,41 @@ void xtouch_mqtt_processPushStatus(JsonDocument &incomingJson)
     }
 }
 
-void xtouch_mqtt_parseMessage(char *topic, byte *payload, unsigned int length, byte type = 0)
+void xtouch_mqtt_parseMessage(char *topic, const byte *payload, unsigned int length, byte type = 0)
 {
 
     ConsoleDebug.println(F("[XTouch][MQTT] ParseMessage"));
     DynamicJsonDocument incomingJson(XTOUCH_MQTT_SERVER_JSON_PARSE_SIZE);
 
-    DynamicJsonDocument amsFilter(128);
-    amsFilter["print"]["*"] = true;
-    amsFilter["camera"]["*"] = true;
-    amsFilter["print"]["ams"] = type == 0;
+    StaticJsonDocument<256> amsFilter;
+    xtouch_mqtt_report_filter(amsFilter, type != 0);
 
     auto deserializeError = deserializeJson(incomingJson, payload, length, DeserializationOption::Filter(amsFilter));
 
     // xtouch_debug_json(incomingJson);
     if (!deserializeError)
     {
-
-        if ((millis() - xtouch_mqtt_lastPushStatus) > (XTOUCH_MQTT_SERVER_PUSH_STATUS_TIMEOUT * 1000))
+        JsonObjectConst system = incomingJson["system"];
+        if (system["command"] == "ledctrl" && system["sequence_id"].as<uint32_t>() == xtouch_light_sequence &&
+            xtouch_light_requests != 0)
         {
-            Serial.println(F("[XTouch][MQTT] Force Reconnect after no Push Status for 30s"));
-            xtouch_pubSubClient.disconnect();
+            if (system["result"] == "fail" || system["result"] == "failed" || system["result"] == "error")
+                xtouch_light_result = "rejected";
+            else if (system["result"] == "success" && strcmp(xtouch_light_result, "state_confirmed") != 0)
+                xtouch_light_result = "acknowledged";
+            ConsoleInfo.printf("[XTouch][LIGHT] response=%s\n", xtouch_light_result);
+        }
+        if (incomingJson["info"]["command"] == "get_version")
+        {
+            for (JsonObjectConst module : incomingJson["info"]["module"].as<JsonArrayConst>())
+            {
+                if (module["name"] != "ota") continue;
+                const char *version = module["sw_ver"] | "";
+                xtouch_config_copy(bambuStatus.printer_firmware, sizeof(bambuStatus.printer_firmware), version);
+                bambuStatus.native_filament_supported = xtouch_bblp_is_p1Series() &&
+                                                       xtouch_p1_native_filament_supported(version);
+                break;
+            }
         }
 
         if (incomingJson.containsKey("print") && incomingJson["print"].containsKey("command"))
@@ -689,137 +599,207 @@ void xtouch_mqtt_parseMessage(char *topic, byte *payload, unsigned int length, b
 
 void xtouch_pubSubClient_streamCallback(char *topic, byte *payload, unsigned int length)
 {
-    xtouch_mqtt_parseMessage(topic, (byte *)stream.get_buffer(), stream.current_length(), 0);
-
-    if (stream.includes("\"ams\""))
+    if (stream.failed())
     {
-        xtouch_mqtt_parseMessage(topic, (byte *)stream.get_buffer(), stream.current_length(), 1);
+        // ConsoleError expands to an if statement. Keep this branch scoped so
+        // the else below belongs to the receive check, not the logging macro.
+        ConsoleError.println(F("[XTouch][MQTT] Report exceeded the receive buffer; dropped"));
+    }
+    else if (strcmp(topic, xtouch_mqtt_report_topic.c_str()) == 0)
+    {
+        // const input prevents ArduinoJson zero-copy parsing from mutating the
+        // buffer before the AMS pass and bounds all string searches.
+        xtouch_mqtt_parseMessage(topic, reinterpret_cast<const byte *>(stream.get_buffer()), stream.current_length(), 0);
+        if (stream.includes("\"ams\""))
+            xtouch_mqtt_parseMessage(topic, reinterpret_cast<const byte *>(stream.get_buffer()), stream.current_length(), 1);
     }
 
     stream.flush();
 }
 
-const char *xtouch_mqtt_generateRandomKey(int keyLength)
+String xtouch_mqtt_client_id()
 {
-    char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    static char key[17];
+    /*
+     * Bambu's broker rejects duplicate MQTT client IDs. The old firmware
+     * generated an ID but passed the literal string "clientId.c_str()" to
+     * PubSubClient, so every XTouch appeared as the same client.
+     */
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    return String("XTOUCH-") + mac;
+}
 
-    for (int i = 0; i < keyLength; i++)
+bool xtouch_mqtt_derive_cloud_username()
+{
+    if (xTouchConfig.xTouchMqttUsername[0] != '\0')
+        return true;
+
+    const char *token = xTouchConfig.xTouchMqttAuthToken;
+    const char *payloadStart = strchr(token, '.');
+    if (payloadStart == nullptr)
+        return false;
+
+    payloadStart++;
+    const char *payloadEnd = strchr(payloadStart, '.');
+    if (payloadEnd == nullptr)
+        return false;
+
+    const size_t payloadLength = static_cast<size_t>(payloadEnd - payloadStart);
+    if (payloadLength == 0 || payloadLength >= 768)
+        return false;
+
+    char encoded[768];
+    memcpy(encoded, payloadStart, payloadLength);
+    encoded[payloadLength] = '\0';
+
+    /* JWT uses base64url while mbedTLS expects regular base64. */
+    for (size_t i = 0; i < payloadLength; i++)
     {
-        int randomIndex = random(sizeof(charset) - 1);
-        key[i] = charset[randomIndex];
+        if (encoded[i] == '-')
+            encoded[i] = '+';
+        else if (encoded[i] == '_')
+            encoded[i] = '/';
     }
 
-    key[keyLength] = '\0';
+    String encodedString(encoded);
+    while ((encodedString.length() % 4) != 0)
+        encodedString += '=';
 
-    return key;
+    unsigned char decoded[768];
+    size_t decodedLength = 0;
+    const int decodeResult = mbedtls_base64_decode(
+        decoded,
+        sizeof(decoded) - 1,
+        &decodedLength,
+        reinterpret_cast<const unsigned char *>(encodedString.c_str()),
+        encodedString.length());
+    if (decodeResult != 0 || decodedLength == 0 || decodedLength >= sizeof(decoded))
+        return false;
+
+    decoded[decodedLength] = '\0';
+    DynamicJsonDocument claims(1024);
+    if (deserializeJson(claims, decoded, decodedLength) != DeserializationError::Ok)
+        return false;
+
+    const char *username = claims["username"] | "";
+    if (username[0] == '\0' || strlen(username) >= sizeof(xTouchConfig.xTouchMqttUsername))
+        return false;
+
+    xtouch_config_copy(
+        xTouchConfig.xTouchMqttUsername,
+        sizeof(xTouchConfig.xTouchMqttUsername),
+        username);
+    return true;
+}
+
+void xtouch_mqtt_schedule_retry()
+{
+    xtouch_mqtt_next_connect_at = millis() + xtouch_mqtt_reconnect_delay;
+    xtouch_mqtt_reconnect_delay = min<uint32_t>(xtouch_mqtt_reconnect_delay * 2, 30000);
 }
 
 void xtouch_mqtt_onMqttReady()
 {
-    if (!xtouch_mqtt_firstConnectionDone)
+    if (!xtouch_mqtt_firstConnectionDone || xTouchConfig.currentScreenIndex == -1)
     {
         loadScreen(0);
         xtouch_screen_startScreenTimer();
+        ConsoleInfo.println(F("[XTouch][MQTT] Printer push_status received"));
     }
     xtouch_mqtt_firstConnectionDone = true;
 }
 
+void xtouch_mqtt_show_provisioning(const char *reason)
+{
+    xtouch_mqtt_needs_provisioning = true;
+    if (xTouchConfig.currentScreenIndex != -1) loadScreen(-1);
+    if (xtouch_screen_onScreenOffTimer) lv_timer_pause(xtouch_screen_onScreenOffTimer);
+    xtouch_screen_touchFromPowerOff = false;
+    xtouch_screen_setBrightness(xTouchConfig.xTouchBacklightLevel);
+    String message = String(reason) + "\nProvision at " + WiFi.localIP().toString();
+    lv_label_set_text(introScreenCaption, message.c_str());
+    lv_timer_handler();
+    xtouch_mqtt_next_connect_at = millis() + 30000;
+}
+
 void xtouch_mqtt_connect()
 {
-
-    ConsoleInfo.println(F("[XTouch][MQTT] Connecting"));
-
-    if (!xtouch_mqtt_firstConnectionDone)
+    if (xtouch_pubSubClient.connected()) return;
+    const unsigned long now = millis();
+    if (xtouch_mqtt_next_connect_at != 0 && static_cast<int32_t>(now - xtouch_mqtt_next_connect_at) < 0) return;
+    if (WiFi.status() != WL_CONNECTED)
     {
-        lv_label_set_text(introScreenCaption, LV_SYMBOL_CHARGE " Connecting to Cloud MQTT");
-        lv_timer_handler();
-        lv_task_handler();
-        delay(32);
+        xtouch_mqtt_schedule_retry();
+        return;
     }
-
-    xtouch_mqtt_firstConnectionDone = false;
-
-    while (!xtouch_pubSubClient.connected())
+    if (xtouch_config_error != nullptr || xTouchConfig.xTouchHost[0] == '\0' || xTouchConfig.xTouchSerialNumber[0] == '\0')
     {
-        String clientId = "XTOUCH-CLIENT-" + String(xtouch_mqtt_generateRandomKey(16));
-        if (xtouch_pubSubClient.connect("clientId.c_str()", "bblp", xTouchConfig.xTouchAccessCode))
-        {
-            ConsoleInfo.println(F("[XTouch][MQTT] ---- CONNECTED ----"));
-
-            xtouch_pubSubClient.subscribe(xtouch_mqtt_report_topic.c_str());
-            xtouch_device_pushall();
-            xtouch_device_get_version();
-            xtouch_mqtt_onMqttReady();
-            xtouch_mqtt_lastPushStatus = millis();
-            break;
-        }
-        else
-        {
-            ConsoleError.printf("[XTouch][MQTT] ---- CONNECTION FAIL ----: %d\n", xtouch_pubSubClient.state());
-
-            switch (xtouch_pubSubClient.state())
-            {
-
-            case -4: // MQTT_CONNECTION_TIMEOUT
-                xtouch_mqtt_connection_timeout_count--;
-                if (xtouch_mqtt_connection_timeout_count == 0)
-                {
-                    ESP.restart();
-                }
-                break;
-            case -2: // MQTT_CONNECT_FAILED
-
-                if (!xtouch_mqtt_firstConnectionDone)
-                {
-                    xtouch_mqtt_connection_fail_count--;
-                    if (xtouch_mqtt_connection_fail_count == 0)
-                    {
-                        if (!xtouch_mqtt_firstConnectionDone)
-                        {
-                            lv_label_set_text(introScreenCaption, LV_SYMBOL_WARNING " MQTT ERROR");
-                            lv_timer_handler();
-                            lv_task_handler();
-                            delay(3000);
-                            lv_label_set_text(introScreenCaption, LV_SYMBOL_REFRESH " REBOOTING");
-                            lv_timer_handler();
-                            lv_task_handler();
-                        }
-                        ESP.restart();
-                    }
-                }
-                break;
-            case -3: // MQTT_CONNECTION_LOST
-            case -1: // MQTT_DISCONNECTED
-
-                break;
-            case 1: // MQTT BAD_PROTOCOL
-            case 2: // MQTT BAD_CLIENT_ID
-            case 3: // MQTT UNAVAILABLE
-            case 4: // MQTT BAD_CREDENTIALS
-            case 5: // MQTT UNAUTHORIZED
-                if (!xtouch_mqtt_firstConnectionDone)
-                {
-                    lv_label_set_text(introScreenCaption, LV_SYMBOL_WARNING " MQTT ERROR");
-                    lv_timer_handler();
-                    lv_task_handler();
-                    delay(3000);
-                    lv_label_set_text(introScreenCaption, LV_SYMBOL_REFRESH " REBOOTING");
-                    lv_timer_handler();
-                    lv_task_handler();
-                }
-                // cloud.clearDeviceList();
-                // cloud.clearPairList();
-                // cloud.clearTokens();
-                ESP.restart();
-
-                break;
-            };
-        }
-        lv_timer_handler();
-        lv_task_handler();
-        delay(32);
+        xtouch_mqtt_show_provisioning("Check MQTT settings");
+        return;
     }
+    const char *username = "bblp";
+    const char *password = xTouchConfig.xTouchAccessCode;
+    if (xTouchConfig.xTouchMqttCloud)
+    {
+        if (!xtouch_mqtt_derive_cloud_username() || xTouchConfig.xTouchMqttAuthToken[0] == '\0')
+        {
+            xtouch_mqtt_show_provisioning("Cloud credentials missing");
+            return;
+        }
+        // An ESP32 without an RTC starts in 1970. Let SNTP run while the UI
+        // and provisioning endpoint remain responsive; never disable TLS.
+        if (time(nullptr) < 1704067200)
+        {
+            if (xTouchConfig.currentScreenIndex == -1)
+                lv_label_set_text(introScreenCaption, "Syncing clock for Cloud TLS");
+            ConsoleInfo.println(F("[XTouch][MQTT] Waiting for network time (NTP)"));
+            xtouch_mqtt_next_connect_at = millis() + 5000;
+            return;
+        }
+        username = xTouchConfig.xTouchMqttUsername;
+        password = xTouchConfig.xTouchMqttAuthToken;
+    }
+    if (xTouchConfig.currentScreenIndex == -1 && !xtouch_mqtt_needs_provisioning)
+    {
+        lv_label_set_text(introScreenCaption, xTouchConfig.xTouchMqttCloud ? "Connecting to Cloud MQTT" : "Connecting to printer");
+        lv_timer_handler();
+    }
+    ConsoleInfo.printf("[XTouch][MQTT] Connecting to %s:%u\n", xTouchConfig.xTouchHost, xTouchConfig.xTouchMqttPort);
+    stream.flush();
+    String clientId = xtouch_mqtt_client_id();
+    if (xtouch_pubSubClient.connect(clientId.c_str(), username, password))
+    {
+        if (!xtouch_pubSubClient.subscribe(xtouch_mqtt_report_topic.c_str()))
+        {
+            ConsoleError.println(F("[XTouch][MQTT] Failed to send subscription"));
+            xtouch_pubSubClient.disconnect();
+            xtouch_mqtt_schedule_retry();
+            return;
+        }
+        ConsoleInfo.printf("[XTouch][MQTT] Connected; subscription sent to %s\n", xtouch_mqtt_report_topic.c_str());
+        xtouch_mqtt_needs_provisioning = false;
+        xtouch_mqtt_reconnect_delay = 1000;
+        xtouch_mqtt_next_connect_at = 0;
+        xtouch_mqtt_refresh_requested = false;
+        xtouch_device_get_version();
+        xtouch_device_pushall();
+        // Broker authentication does not prove the printer is online.
+        if (xTouchConfig.currentScreenIndex == -1)
+            lv_label_set_text(introScreenCaption, "Cloud connected; waiting for printer");
+        xtouch_mqtt_lastPushStatus = millis();
+        return;
+    }
+    const int state = xtouch_pubSubClient.state();
+    ConsoleError.printf("[XTouch][MQTT] Connection failed: %d\n", state);
+    if (state == MQTT_CONNECT_BAD_CREDENTIALS || state == MQTT_CONNECT_UNAUTHORIZED)
+    {
+        xtouch_mqtt_show_provisioning("MQTT authentication failed");
+        return;
+    }
+    if (xTouchConfig.currentScreenIndex == -1 && !xtouch_mqtt_needs_provisioning)
+        lv_label_set_text(introScreenCaption, "MQTT retrying");
+    // Schedule relative to completion, so a slow TLS failure still backs off.
+    xtouch_mqtt_schedule_retry();
 }
 
 void xtouch_mqtt_setup()
@@ -834,16 +814,29 @@ void xtouch_mqtt_setup()
     xtouch_wiFiClientSecure.flush();
     xtouch_wiFiClientSecure.stop();
 
-    xtouch_wiFiClientSecure.setInsecure();
+    if (xTouchConfig.xTouchMqttCloud)
+    {
+        xtouch_wiFiClientSecure.setCACert(us_mqtt_bambulab_com);
+        configTime(0, 0, "time.cloudflare.com", "pool.ntp.org", "time.google.com");
+    }
+    else
+    {
+        // The existing local-printer path uses its self-signed certificate.
+        xtouch_wiFiClientSecure.setInsecure();
+    }
+    xtouch_wiFiClientSecure.setTimeout(XTOUCH_MQTT_SERVER_TIMEOUT);
+    xtouch_wiFiClientSecure.setHandshakeTimeout(8);
+    xtouch_pubSubClient.setSocketTimeout(5);
 
-    xtouch_pubSubClient.setServer(xTouchConfig.xTouchHost, 8883);
-    xtouch_pubSubClient.setBufferSize(2048); // 2KB for mqtt message JWT output
+    xtouch_pubSubClient.setServer(xTouchConfig.xTouchHost, xTouchConfig.xTouchMqttPort);
+    xtouch_pubSubClient.setBufferSize(4096); // Cloud auth tokens can make CONNECT larger than 2KB.
     xtouch_pubSubClient.setStream(stream);
     xtouch_pubSubClient.setCallback(xtouch_pubSubClient_streamCallback);
-    xtouch_pubSubClient.setKeepAlive(10);
+    /* Match ha-bambulab's 30s keepalive; the broker allows 1.5x this window. */
+    xtouch_pubSubClient.setKeepAlive(30);
 
     /* home */
-    lv_msg_subscribe(XTOUCH_COMMAND_LIGHT_TOGGLE, (lv_msg_subscribe_cb_t)xtouch_device_onLightToggleCommand, NULL);
+    lv_msg_subscribe(XTOUCH_COMMAND_LIGHT_TOGGLE, xtouch_device_onLightToggleCommand, NULL);
     lv_msg_subscribe(XTOUCH_COMMAND_STOP, (lv_msg_subscribe_cb_t)xtouch_device_onStopCommand, NULL);
     lv_msg_subscribe(XTOUCH_COMMAND_PAUSE, (lv_msg_subscribe_cb_t)xtouch_device_onPauseCommand, NULL);
     lv_msg_subscribe(XTOUCH_COMMAND_RESUME, (lv_msg_subscribe_cb_t)xtouch_device_onResumeCommand, NULL);
@@ -877,10 +870,27 @@ void xtouch_mqtt_loop()
     xtouch_pubSubClient.loop();
     if (!xtouch_pubSubClient.connected())
     {
-        Serial.println("π-----DISCONNECTED-----");
         xtouch_mqtt_connect();
         return;
     }
+
+    const unsigned long quietFor = millis() - xtouch_mqtt_lastPushStatus;
+    if (quietFor > XTOUCH_MQTT_SERVER_PUSH_STATUS_TIMEOUT * 1000UL && !xtouch_mqtt_refresh_requested)
+    {
+        ConsoleInfo.println(F("[XTouch][MQTT] No status for 60s; requesting status push"));
+        xtouch_device_start_push();
+        xtouch_device_pushall();
+        xtouch_mqtt_refresh_requested = true;
+    }
+    if (quietFor > XTOUCH_MQTT_SERVER_PUSH_STATUS_TIMEOUT * 2000UL)
+    {
+        ConsoleError.println(F("[XTouch][MQTT] Printer still silent; reconnecting"));
+        xtouch_pubSubClient.disconnect();
+        stream.flush();
+        xtouch_mqtt_schedule_retry();
+        return;
+    }
+
     delay(10);
 }
 

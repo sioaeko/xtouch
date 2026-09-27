@@ -17,7 +17,7 @@ def is_pio_build():
     return not env.IsIntegrationDump()
 
 
-if is_pio_build() == True:
+if is_pio_build() and env.GetProjectOption("custom_refresh_errors", "no") == "yes":
     print(f"XTOUCH PREBUILD")
     result = subprocess.run(['node', 'scripts/download-errors.js'],
                             text=True, check=True, capture_output=True)

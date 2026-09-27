@@ -31,12 +31,15 @@ void xtouch_eeprom_setup()
 
 void xtouch_eeprom_write(int address, byte value)
 {
-    byte inputBuffer[XTOUCH_EEPROM_SIZE];
+    byte inputBuffer[XTOUCH_EEPROM_SIZE] = {};
     const uint8_t *outputBuffer = inputBuffer;
 
-    File eepromFile = SPIFFS.open(xtouch_paths_eeprom, "w+");
+    File eepromFile = SPIFFS.open(xtouch_paths_eeprom, FILE_READ);
     eepromFile.read(inputBuffer, XTOUCH_EEPROM_SIZE);
+    eepromFile.close();
+    if (address < 0 || address >= XTOUCH_EEPROM_SIZE) return;
     inputBuffer[address] = value;
+    eepromFile = SPIFFS.open(xtouch_paths_eeprom, FILE_WRITE);
     eepromFile.write(outputBuffer, XTOUCH_EEPROM_SIZE);
 
     eepromFile.close();
@@ -44,7 +47,8 @@ void xtouch_eeprom_write(int address, byte value)
 
 uint8_t xtouch_eeprom_read(int address)
 {
-    byte inputBuffer[XTOUCH_EEPROM_SIZE];
+    byte inputBuffer[XTOUCH_EEPROM_SIZE] = {};
+    if (address < 0 || address >= XTOUCH_EEPROM_SIZE) return 0;
     File eepromFile = SPIFFS.open(xtouch_paths_eeprom, FILE_READ);
 
     eepromFile.read(inputBuffer, XTOUCH_EEPROM_SIZE);

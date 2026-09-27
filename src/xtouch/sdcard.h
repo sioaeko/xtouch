@@ -1,57 +1,63 @@
 #ifndef _XLCD_SDCARD
 #define _XLCD_SDCARD
 
-#include "FS.h"
-#include "SD.h"
-#include <ArduinoJson.h>
-#include <Arduino.h>
+#include <SD.h>
+#include <SPI.h>
+#include <SPIFFS.h>
 
+// SD is an optional boot-time import/update source. Release VSPI before the
+// display starts: the card and LCD use different pins on the same SPI host.
 bool xtouch_sdcard_setup()
 {
-    if (!SD.begin())
+    SPI.begin(18, 19, 23, 5);
+    if (!SD.begin(5, SPI, 4000000))
     {
-        lv_label_set_text(introScreenCaption, LV_SYMBOL_SD_CARD " INSERT SD CARD");
-        lv_obj_set_style_text_color(introScreenCaption, lv_color_hex(0xFF0000), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_timer_handler();
-
-        ConsoleError.println("[XTouch][SD] Card Mount Failed");
+        SD.end();
+        SPI.end();
+        ConsoleInfo.println("[XTouch][STORAGE] No SD; using internal flash");
         return false;
     }
-
-    lv_obj_set_style_text_color(introScreenCaption, lv_color_hex(0x555555), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    uint8_t cardType = SD.cardType();
-
-    if (cardType == CARD_NONE)
-    {
-        ConsoleError.println("[XTouch][SD] No SD card attached");
-        return false;
-    }
-
-    ConsoleInfo.print("XTouch][SD] SD Card Type: ");
-
-    if (cardType == CARD_MMC)
-    {
-        ConsoleInfo.println("[XTouch][SD] MMC");
-    }
-    else if (cardType == CARD_SD)
-    {
-        ConsoleInfo.println("[XTouch][SD] SDSC");
-    }
-    else if (cardType == CARD_SDHC)
-    {
-        ConsoleInfo.println("[XTouch][SD] SDHC");
-    }
-    else
-    {
-        ConsoleInfo.println("[XTouch][SD] UNKNOWN");
-    }
-
-    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-    ConsoleInfo.printf("[XTouch][SD] SD Card Size: %lluMB\n", cardSize);
-    xtouch_filesystem_mkdir(SD, xtouch_paths_root);
-
+    ConsoleInfo.printf("[XTouch][SD] Optional card mounted: %lluMB\n", SD.cardSize() / (1024 * 1024));
     return true;
+}
+
+void xtouch_sdcard_import()
+{
+    const char *paths[] = {xtouch_paths_config, xtouch_paths_legacy_config,
+                          xtouch_paths_settings, xtouch_paths_touch};
+    for (const char *path : paths)
+    {
+        // Internal provisioning wins over a stale card left in the slot.
+        if (SPIFFS.exists(path) || !SD.exists(path)) continue;
+        if ((path == xtouch_paths_config || path == xtouch_paths_legacy_config) &&
+            (SPIFFS.exists(xtouch_paths_config) || SPIFFS.exists(xtouch_paths_config_backup))) continue;
+        File source = SD.open(path, FILE_READ);
+        if (!source || source.size() == 0 || source.size() > 8192) continue;
+        File target = SPIFFS.open(path, FILE_WRITE);
+        if (!target) continue;
+        size_t copied = 0;
+        uint8_t buffer[256];
+        while (source.available())
+        {
+            const size_t count = source.read(buffer, sizeof(buffer));
+            if (count == 0) break;
+            const size_t written = target.write(buffer, count);
+            copied += written;
+            if (written != count) break;
+        }
+        target.flush();
+        const bool complete = copied == source.size() && target.size() == source.size();
+        source.close();
+        target.close();
+        if (!complete) SPIFFS.remove(path);
+        else ConsoleInfo.printf("[XTouch][STORAGE] Imported %s to internal flash\n", path);
+    }
+}
+
+void xtouch_sdcard_end()
+{
+    SD.end();
+    SPI.end();
 }
 
 #endif

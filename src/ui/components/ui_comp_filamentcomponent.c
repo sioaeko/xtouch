@@ -1,4 +1,5 @@
 #include "../ui.h"
+#include "xtouch/filament_state.h"
 
 
 void ui_event_comp_filamentComponent_onNozzleTemp(lv_event_t *e)
@@ -56,21 +57,19 @@ void ui_event_comp_filamentComponent_filamentScreenLoad(lv_event_t *e)
     }
 }
 
+void ui_filamentComponent_update_buttons(lv_obj_t *target)
+{
+    lv_obj_t *load = ui_comp_get_child(target, UI_COMP_FILAMENTCOMPONENT_FILAMENTSCREENFILAMENT_FILAMENTSCREENLOAD);
+    lv_obj_t *unload = ui_comp_get_child(target, UI_COMP_FILAMENTCOMPONENT_FILAMENTSCREENFILAMENT_FILAMENTSCREENUNLOAD);
+    if (xtouch_filament_can_load(&bambuStatus)) lv_obj_clear_state(load, LV_STATE_DISABLED);
+    else lv_obj_add_state(load, LV_STATE_DISABLED);
+    if (xtouch_filament_can_unload(&bambuStatus)) lv_obj_clear_state(unload, LV_STATE_DISABLED);
+    else lv_obj_add_state(unload, LV_STATE_DISABLED);
+}
+
 void ui_filamentComponent_onAMSBits(lv_event_t *e)
 {
-    lv_obj_t *target = lv_event_get_target(e);
-    lv_msg_t *m = lv_event_get_msg(e);
-
-    lv_obj_t *unload = ui_comp_get_child(target, UI_COMP_FILAMENTCOMPONENT_FILAMENTSCREENFILAMENT_FILAMENTSCREENUNLOAD);
-
-    if (bambuStatus.ams_exist_bits != 0 && bambuStatus.ams_status_main == AMS_STATUS_MAIN_IDLE && bambuStatus.hw_switch_state == 1 && bambuStatus.m_tray_now == 255)
-    {
-        lv_obj_clear_state(unload, LV_STATE_DISABLED);
-    }
-    else
-    {
-        lv_obj_add_state(unload, LV_STATE_DISABLED);
-    }
+    ui_filamentComponent_update_buttons(lv_event_get_target(e));
 }
 
 void ui_event_comp_filamentComponent_onNozzleTempClick(lv_event_t *e)
@@ -325,5 +324,6 @@ lv_obj_t *ui_filamentComponent_create(lv_obj_t *comp_parent)
     lv_msg_subsribe_obj(XTOUCH_ON_NOZZLE_TEMP, cui_filamentScreenNozzleTemp, NULL);    
 
     ui_comp_filamentComponent_create_hook(cui_filamentComponent);
+    ui_filamentComponent_update_buttons(cui_filamentComponent);
     return cui_filamentComponent;
 }

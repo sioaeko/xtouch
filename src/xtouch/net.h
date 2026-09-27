@@ -3,6 +3,7 @@
 
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <MD5Builder.h>
 #include "bbl-certs.h"

@@ -548,6 +548,8 @@ lv_obj_t *ui_settingsComponent_create(lv_obj_t *comp_parent)
 
     lv_obj_t *cui_settings_ota;
     cui_settings_ota = lv_obj_create(cui_settingsComponent);
+    if (!XTOUCH_ONLINE_OTA_AVAILABLE)
+        lv_obj_add_flag(cui_settings_ota, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_width(cui_settings_ota, lv_pct(100));
     lv_obj_set_height(cui_settings_ota, LV_SIZE_CONTENT); /// 50
     lv_obj_set_flex_flow(cui_settings_ota, LV_FLEX_FLOW_ROW);

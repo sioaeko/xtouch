@@ -4,6 +4,10 @@
 const char *xtouch_paths_eeprom = "/eeprom.bin";
 const char *xtouch_paths_root = "/xtouch";
 const char *xtouch_paths_config = "/xtouch.json";
+const char *xtouch_paths_config_backup = "/xtouch.json.bak";
+const char *xtouch_paths_config_pending = "/xtouch.json.tmp";
+/* The Chrome provisioning extension historically wrote this filename. */
+const char *xtouch_paths_legacy_config = "/provisioning.json";
 
 const char *xtouch_paths_settings = "/xtouch/settings.json";
 const char *xtouch_paths_touch = "/xtouch/touch.json";

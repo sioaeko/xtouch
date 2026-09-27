@@ -2,3 +2,13 @@
 .vscode
 .DS_Store
 node_modules
+__pycache__/
+dist/
+/xtouch.json
+/provisioning.json
+/.playwright-cli/
+/output/playwright/
+/haru-hanjang/
+/.env
+/.env.*
+/*.bak

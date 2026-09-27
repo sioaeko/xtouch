@@ -147,6 +147,18 @@ def post_build_merge_bin(version):
 
 def post_build_action(source, target, env):
 
+    if env.GetProjectOption("custom_export_legacy_artifacts", "no") != "yes":
+        print("XTOUCH POSTBUILD: local build; package with python scripts/package-firmware.py")
+        return
+
+    artifact_root = os.path.abspath(os.path.join(os.getcwd(), "..", "xtouch-bin"))
+    if not os.path.isdir(artifact_root):
+        # A source checkout can be built without the separate xtouch-bin
+        # publication repository. Keep the firmware.bin produced by PlatformIO
+        # and skip only the release-copy/version-bump side effects.
+        print(f"XTOUCH POSTBUILD: skipping release artifacts; missing {artifact_root}")
+        return
+
     with open("version.json", "r") as version_file:
         version_data = json.load(version_file)
         version_value = version_data.get("version", "UNKNOWN")

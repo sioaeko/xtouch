@@ -1,0 +1,226 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,"><title>XTouch 설정</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#161918;color:#edf1ee}
+*{box-sizing:border-box}body{margin:0}main{max-width:580px;margin:0 auto;padding:36px 22px 60px}
+h1{font-size:28px;margin:8px 0 12px}p{line-height:1.65;color:#bcc8bf}small{display:block;color:#a9b7ac;line-height:1.6}
+.brand{color:#b5e5a4;font-size:13px;letter-spacing:2px}fieldset{padding:0;margin:28px 0;border:0}
+legend{font-size:18px;font-weight:650;margin-bottom:14px}label{display:block;font-size:14px;margin:16px 0 7px}
+input,select,button{font:inherit;border-radius:8px;padding:12px;width:100%}input,select{background:#202722;color:#fff;border:1px solid #607566}
+input:focus,select:focus,button:focus-visible{outline:2px solid #b5e5a4;outline-offset:3px}
+button{cursor:pointer;background:#b5e5a4;color:#122112;border:0;font-weight:650;margin-top:14px;min-height:46px}
+button:disabled{opacity:.55;cursor:default}.secondary{background:#28382c;color:#d6eed5;border:1px solid #68836d}
+#status,#cloudStatus{white-space:pre-wrap;min-height:2em;font-size:14px}#status{padding:14px 0;border-top:1px solid #39463c}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}[hidden]{display:none!important}
+@media(max-width:400px){.row{grid-template-columns:1fr;gap:0}}
+</style></head>
+<body><main>
+<div class="brand">XTOUCH · CYD</div><h1>프린터 연결 설정</h1>
+<p>Bambu Lab 계정으로 로그인하고 프린터를 선택하세요. SD 카드 없이 보드에 저장합니다.</p>
+<section id="usb" hidden><button id="connect" class="secondary" type="button">USB 보드 연결</button>
+<small>Chrome 또는 Edge에서 CH340 보드를 선택하세요. 이전 XTouch 설정 탭과 시리얼 모니터는 닫아 주세요.</small>
+<p id="usbStatus" role="status" aria-live="polite">USB 연결 전입니다. 케이블을 꽂은 뒤 위 버튼에서 보드를 선택하세요.</p>
+<button id="disconnect" class="secondary" type="button" hidden>USB 연결 해제</button></section>
+<form id="setup">
+<fieldset><legend>Wi-Fi</legend>
+<label for="ssid">2.4GHz Wi-Fi 이름</label><input id="ssid" autocomplete="off" required maxlength="32">
+<label for="pwd">Wi-Fi 비밀번호</label><input id="pwd" type="password" autocomplete="new-password" maxlength="64">
+</fieldset>
+<fieldset><legend>프린터 연결</legend>
+<label for="mode">연결 방식</label><select id="mode"><option id="cloudChoice" value="cloud">Bambu Lab 계정 로그인 (권장)</option><option value="local">LAN 수동 연결</option><option value="manual">Cloud 토큰 직접 입력 (고급)</option></select>
+<div id="regionRow"><label for="region">계정 지역</label><select id="region"><option value="Global">Global</option><option value="China">China</option></select></div>
+<small id="helperNote" hidden>계정 로그인은 PC에서 scripts/setup-server.py를 실행해 이용하세요. 보드의 Wi-Fi 설정 화면에서는 LAN 또는 Cloud 토큰 입력을 사용할 수 있습니다.</small>
+<div id="cloudPanel">
+<div id="reuseRow" hidden><label for="account">이번 실행에서 로그인한 계정</label><select id="account"><option value="">새 계정으로 로그인</option></select></div>
+<div id="loginFields">
+<label for="email">Bambu Lab 이메일</label><input id="email" type="email" autocomplete="username" maxlength="254">
+<label for="accountPassword">Bambu Lab 비밀번호</label><input id="accountPassword" type="password" autocomplete="current-password" maxlength="1024">
+<small>비밀번호가 설정된 Bambu Lab 계정이 필요합니다. 비밀번호 없는 소셜 로그인은 지원하지 않습니다.</small>
+<button id="login" type="button" class="secondary">Bambu Lab 로그인</button>
+</div>
+<div id="challenge" hidden>
+<label id="codeLabel" for="verificationCode">이메일 인증 코드</label><input id="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10">
+<button id="verify" type="button">인증 코드 확인</button><button id="resend" type="button" class="secondary">이메일 코드 다시 받기</button>
+</div>
+<div id="printerRow" hidden><label for="printer">내 프린터</label><select id="printer"><option value="">프린터를 선택하세요</option></select>
+<button id="refreshDevices" type="button" class="secondary">프린터 목록 새로고침</button></div>
+<button id="restartLogin" type="button" class="secondary" hidden>로그인 다시 시작</button>
+<p id="cloudStatus" role="status" aria-live="polite">로그인 후 연결된 프린터를 불러옵니다. 계정 비밀번호는 보드에 저장하지 않습니다.</p>
+</div>
+<div id="manualPanel" hidden>
+<div class="row"><div><label for="serial">프린터 시리얼 번호</label><input id="serial" maxlength="15" pattern="[A-Za-z0-9]+" autocomplete="off"></div>
+<div><label for="model">모델</label><select id="model"><option>P1S</option><option>P1P</option><option>X1</option><option>X1C</option></select></div></div>
+<div id="localFields" hidden><label for="host">프린터 LAN IP</label><input id="host" placeholder="192.168.1.100" maxlength="63" autocomplete="off">
+<label for="accessCode">프린터 LAN access code</label><input id="accessCode" type="password" minlength="8" maxlength="8" autocomplete="new-password"><small>LAN 모드의 프린터 화면에 표시된 IP와 8자리 access code를 입력하세요.</small></div>
+<div id="tokenFields"><label for="username">Cloud 사용자명 (u_…)</label><input id="username" maxlength="63" autocomplete="off" placeholder="u_123456789">
+<label for="token">Cloud auth_token</label><input id="token" type="password" maxlength="2047" autocomplete="new-password"><small>기존 연결 정보를 재사용할 때만 입력합니다. JWT 토큰이면 사용자명을 비워도 됩니다.</small></div>
+</div>
+</fieldset>
+<button id="save" type="submit">보드에 저장하고 재시작</button>
+<p id="status" role="status" aria-live="polite">저장 후에는 PC 없이 프린터에 연결됩니다.</p>
+</form></main>
+<script>
+const byId = id => document.getElementById(id);
+const usbMode = ['localhost','127.0.0.1',''].includes(location.hostname);
+let port, writer, serialReader, pending, connecting, usbReady=false, helperReady=false, csrf='', activeSession='', authStage='', devices=[];
+byId('usb').hidden=!usbMode;
+const messages={invalid_email:'이메일 주소를 확인하세요.',password_required:'Bambu Lab 비밀번호를 입력하세요.',invalid_region:'계정 지역을 확인하세요.',login_rejected:'로그인에 실패했습니다. 이메일·비밀번호 또는 인증 코드를 확인하세요.',code_expired:'인증 코드가 만료됐습니다. 새 코드를 요청하세요.',code_incorrect:'인증 코드가 올바르지 않습니다.',invalid_code:'숫자로 된 인증 코드를 입력하세요.',code_rate_limited:'코드 재요청은 60초 뒤에 가능합니다.',rate_limited:'요청이 너무 많습니다. 잠시 후 다시 시도하세요.',cloudflare_blocked:'Bambu 서비스가 로그인 요청을 차단했습니다. 잠시 후 다시 시도하거나 고급 토큰 입력을 사용하세요.',cloud_unreachable:'Bambu 서비스에 연결하지 못했습니다. 인터넷 연결을 확인하세요.',session_expired:'로그인 세션이 만료됐습니다. 다시 로그인하세요.',login_required:'먼저 로그인하세요.',username_unavailable:'Cloud 사용자 정보를 가져오지 못했습니다.',unsupported_printer:'선택한 프린터는 이 CYD 리비전의 지원 대상이 아닙니다.',invalid_cloud_response:'Bambu 서비스 응답을 처리하지 못했습니다.',device_list_failed:'프린터 목록을 불러오지 못했습니다.',token_too_large:'발급된 토큰이 보드 저장 한도를 초과합니다.',code_request_failed:'인증 코드를 요청하지 못했습니다.',code_not_expected:'로그인부터 다시 시작하세요.',local_only:'PC 설정 도구를 다시 열어 주세요.',setup_failed:'설정 처리에 실패했습니다. 다시 시도하세요.'};
+function status(text){byId('status').textContent=text;}
+function usbStatus(text){byId('usbStatus').textContent=text;status(text);}
+function usbError(error){
+  if(error.name==='NotFoundError')return 'USB 보드 선택이 취소됐습니다. 연결 버튼을 눌러 CH340/COM7을 선택하세요.';
+  if(error.name==='NetworkError'||/Failed to open serial port|already open/i.test(error.message))return 'USB 포트를 열 수 없습니다. 이전 XTouch 설정 탭이나 시리얼 모니터가 사용 중이면 닫은 뒤 다시 연결하세요.';
+  return error.message;
+}
+function cloudStatus(text){byId('cloudStatus').textContent=text;}
+function renderMode(){
+  const mode=byId('mode').value, cloud=mode==='cloud', local=mode==='local';
+  byId('cloudPanel').hidden=!cloud;byId('manualPanel').hidden=cloud;byId('localFields').hidden=!local;byId('tokenFields').hidden=mode!=='manual';byId('regionRow').hidden=local;
+  for(const id of ['serial','model'])byId(id).disabled=cloud;
+  for(const id of ['host','accessCode'])byId(id).disabled=!local;
+  for(const id of ['username','token'])byId(id).disabled=mode!=='manual';
+  for(const id of ['email','accountPassword','verificationCode','printer'])byId(id).disabled=!cloud;
+  byId('serial').required=!cloud;byId('host').required=local;byId('accessCode').required=local;byId('token').required=mode==='manual';
+  byId('save').disabled=cloud&&(!helperReady||!activeSession||!devices.some(d=>d.serial===byId('printer').value&&d.supported));
+}
+async function api(path,body){
+  if(!helperReady)throw Error('이메일 로그인은 PC 설정 도구에서 이용하세요.');
+  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-XTouch-Setup':csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
+  const result=await response.json();
+  if(!response.ok){if(['session_expired','login_required'].includes(result.error))clearLogin();throw Error(messages[result.error]||'요청을 처리하지 못했습니다.');}
+  return result;
+}
+function showAccounts(accounts){
+  const select=byId('account');select.replaceChildren();
+  const first=document.createElement('option');first.value='';first.textContent='새 계정으로 로그인';select.append(first);
+  for(const account of accounts){const option=document.createElement('option');option.value=account.id;option.textContent=account.email+' · '+account.region;select.append(option);}
+  byId('reuseRow').hidden=!accounts.length;
+  select.value=activeSession;
+}
+async function refreshAccounts(){
+  const response=await fetch('/api/bootstrap',{cache:'no-store'});
+  if(response.ok){const data=await response.json();showAccounts(data.accounts||[]);}
+}
+async function initializeSetup(){
+  byId('model').value='P1S';byId('mode').value=usbMode?'cloud':'manual';
+  if(usbMode){
+    try{const response=await fetch('/api/bootstrap',{cache:'no-store',signal:AbortSignal.timeout(3000)});if(response.ok){const data=await response.json();helperReady=data.helper===true;csrf=data.csrf||'';showAccounts(data.accounts||[]);}}catch(_error){}
+  }
+  byId('cloudChoice').disabled=!helperReady;byId('helperNote').hidden=helperReady;
+  if(!helperReady)byId('mode').value='manual';
+  renderMode();
+}
+function clearLogin(){activeSession='';devices=[];authStage='';byId('challenge').hidden=true;byId('printerRow').hidden=true;byId('restartLogin').hidden=true;byId('loginFields').hidden=false;byId('account').value='';byId('verificationCode').value='';renderMode();}
+function showStage(stage){
+  authStage=stage;byId('challenge').hidden=stage==='authenticated';byId('loginFields').hidden=true;byId('restartLogin').hidden=false;
+  byId('codeLabel').textContent=stage==='two_factor'?'인증 앱의 2단계 인증 코드':'이메일로 받은 인증 코드';
+  cloudStatus(stage==='two_factor'?'인증 앱의 코드를 입력하세요.':'이메일 인증 코드를 입력하세요. 도착하지 않으면 다시 받기를 누르세요.');
+}
+async function loadDevices(){
+  byId('printerRow').hidden=false;cloudStatus('프린터 목록을 불러오는 중…');
+  const result=await api('/api/devices',{session_id:activeSession});devices=result.devices;
+  const select=byId('printer');select.replaceChildren();
+  const first=document.createElement('option');first.value='';first.textContent='프린터를 선택하세요';select.append(first);
+  for(const device of devices){const option=document.createElement('option');option.value=device.serial;option.disabled=!device.supported;option.textContent=device.name+' · '+device.model+' · '+(device.supported?(device.online?'온라인':'오프라인'):'지원 대상 아님');select.append(option);}
+  const supported=devices.filter(d=>d.supported);if(supported.length===1)select.value=supported[0].serial;
+  byId('challenge').hidden=true;byId('loginFields').hidden=true;byId('restartLogin').hidden=false;
+  cloudStatus(result.email+' 로그인됨. '+(supported.length?'저장할 프린터를 선택하세요.':'지원하는 P1S/P1P/X1/X1C가 없습니다.'));
+  renderMode();await refreshAccounts();
+}
+byId('login').onclick=async()=>{
+  const email=byId('email').value.trim(),password=byId('accountPassword').value;
+  if(!email||!byId('email').reportValidity()||!password){cloudStatus('이메일과 Bambu Lab 비밀번호를 입력하세요.');return;}
+  byId('login').disabled=true;clearLogin();cloudStatus('Bambu Lab에 로그인하는 중…');
+  try{const result=await api('/api/login',{email,password,region:byId('region').value});activeSession=result.session_id;showStage(result.stage);if(result.stage==='authenticated')await loadDevices();}
+  catch(error){cloudStatus(error.message);}finally{byId('accountPassword').value='';byId('login').disabled=false;renderMode();}
+};
+byId('verify').onclick=async()=>{
+  byId('verify').disabled=true;
+  try{const result=await api('/api/verify',{session_id:activeSession,code:byId('verificationCode').value.trim()});showStage(result.stage);if(result.stage==='authenticated')await loadDevices();}
+  catch(error){cloudStatus(error.message);}finally{byId('verificationCode').value='';byId('verify').disabled=false;renderMode();}
+};
+byId('resend').onclick=async()=>{byId('resend').disabled=true;try{const result=await api('/api/resend',{session_id:activeSession});showStage(result.stage);cloudStatus('새 이메일 코드를 요청했습니다. 받은 코드를 입력하세요.');}catch(error){cloudStatus(error.message);}finally{byId('resend').disabled=false;}};
+byId('refreshDevices').onclick=async()=>{try{await loadDevices();}catch(error){cloudStatus(error.message);}};
+byId('restartLogin').onclick=async()=>{byId('restartLogin').disabled=true;try{if(activeSession)await api('/api/logout',{session_id:activeSession});clearLogin();await refreshAccounts();cloudStatus('이메일과 Bambu Lab 비밀번호를 입력하세요.');}catch(error){cloudStatus(error.message);}finally{byId('restartLogin').disabled=false;}};
+byId('account').onchange=async()=>{const selected=byId('account').value;if(!selected){clearLogin();return;}activeSession=selected;try{await loadDevices();}catch(error){cloudStatus(error.message);}};
+byId('region').onchange=()=>{if(activeSession)clearLogin();};byId('mode').onchange=renderMode;byId('printer').onchange=renderMode;
+async function readSerial(activePort,activeWriter){
+  const reader=activePort.readable.getReader(),decoder=new TextDecoder();serialReader=reader;let buffer='';
+  try{for(;;){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});let newline;
+    while((newline=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,newline).trim();buffer=buffer.slice(newline+1);
+      if(!usbReady&&port===activePort&&line.includes('[XTouch] CYD Cloud revision'))usbStatus('USB 연결로 보드가 재시작했습니다. 부팅이 끝날 때까지 기다려 주세요.');
+      if(line.startsWith('XTOUCH_RESULT ')&&pending&&port===activePort){try{const result=JSON.parse(line.slice(14));if(pending.accept(result)){pending.resolve(result);pending=null;}}catch(error){pending.reject(error);pending=null;}}}
+    if(buffer.length>16384)buffer='';}}
+  catch(error){if(pending&&port===activePort){pending.reject(error);pending=null;}}
+  finally{
+    reader.releaseLock();if(serialReader===reader)serialReader=null;
+    try{activeWriter.releaseLock();}catch(_error){}
+    if(writer===activeWriter)writer=null;
+    if(port===activePort){port=null;const wasReady=usbReady;usbReady=false;if(pending){pending.reject(Error('USB 연결이 끊겼습니다. 다시 연결하세요.'));pending=null;}byId('connect').disabled=false;byId('connect').textContent='USB 보드 연결';byId('disconnect').hidden=true;if(wasReady)byId('usbStatus').textContent='USB 연결이 해제됐습니다.';}
+    // Release the UI before close: some drivers delay completion after removal.
+    try{await activePort.close();}catch(_error){}
+  }
+}
+async function command(text,timeout=20000,accept=()=>true){
+  if(!writer)throw Error('먼저 USB 보드에 연결하세요.');if(pending)throw Error('이전 요청을 처리하고 있습니다.');let timer;
+  const response=new Promise((resolve,reject)=>{pending={resolve,reject,accept};timer=setTimeout(()=>{pending=null;reject(Error('보드 응답 시간이 초과됐습니다. USB를 다시 연결하세요.'));},timeout);});
+  try{await writer.write(new TextEncoder().encode(text+'\n'));return await response;}
+  catch(error){if(pending)pending.reject(error);await response.catch(()=>{});throw error;}
+  finally{clearTimeout(timer);pending=null;}
+}
+async function openUsb(){
+  byId('connect').disabled=true;
+  usbStatus('CH340 보드를 선택하세요. 연결을 확인하는 동안 잠시 기다려 주세요.');
+  let selectedPort,opened=false;
+  try{
+    if(!navigator.serial)throw Error('USB 설정은 Chrome 또는 Edge에서 열어 주세요.');
+    selectedPort=await navigator.serial.requestPort({filters:[{usbVendorId:0x1a86,usbProductId:0x7523}]});
+    await selectedPort.open({baudRate:115200});opened=true;port=selectedPort;
+    await port.setSignals({dataTerminalReady:false,requestToSend:false});writer=port.writable.getWriter();readSerial(port,writer);
+    usbStatus('USB 포트를 열었습니다. 보드 부팅과 응답을 기다리는 중… (최대 35초)');
+    let result;
+    // CH340 Web Serial open can reset the ESP32. Requests sent before UART/setup
+    // initialization may be lost; keep probing through cold boot and Wi-Fi setup.
+    for(let attempt=0;attempt<14;attempt++){
+      try{result=await command('\nXTOUCH STATUS',2500,r=>r.status==='ok'&&typeof r.version==='string');break;}
+      catch(error){if(!writer||attempt===13)throw error;}
+    }
+    if(!writer||port!==selectedPort)throw Error('USB 연결이 끊겼습니다. 다시 연결하세요.');
+    usbReady=true;usbStatus('USB 연결됨 · '+result.version);byId('connect').textContent='USB 연결됨';byId('disconnect').hidden=false;
+  }catch(error){
+    usbReady=false;byId('connect').disabled=false;byId('connect').textContent='USB 보드 연결';usbStatus(usbError(error));
+    if(serialReader&&port===selectedPort){serialReader.cancel().catch(()=>{});}
+    else if(opened){if(port===selectedPort)port=null;try{await selectedPort.close();}catch(_error){}}
+    throw error;
+  }
+}
+function ensureUsb(){
+  if(writer&&usbReady)return Promise.resolve();
+  if(!connecting)connecting=openUsb().finally(()=>{connecting=null;});
+  return connecting;
+}
+byId('connect').onclick=async()=>{try{await ensureUsb();}catch(_error){};};
+byId('disconnect').onclick=async()=>{
+  try{if(serialReader)await serialReader.cancel();usbStatus('USB 연결이 해제됐습니다. 다른 설정 탭에서 다시 연결할 수 있습니다.');}
+  catch(error){usbStatus(usbError(error));}
+};
+async function buildConfig(){
+  const mode=byId('mode').value;let mqtt;
+  if(mode==='cloud'){if(!activeSession||!devices.some(d=>d.serial===byId('printer').value&&d.supported))throw Error('먼저 로그인하고 프린터를 선택하세요.');const result=await api('/api/config',{session_id:activeSession,serial:byId('printer').value});mqtt=result.mqtt;}
+  else if(mode==='local')mqtt={mode:'local',host:byId('host').value.trim(),accessCode:byId('accessCode').value.trim(),serialNumber:byId('serial').value.trim(),printerModel:byId('model').value};
+  else mqtt={mode:'cloud',region:byId('region').value,username:byId('username').value.trim(),authToken:byId('token').value.trim(),serialNumber:byId('serial').value.trim(),printerModel:byId('model').value};
+  return {ssid:byId('ssid').value,pwd:byId('pwd').value,mqtt};
+}
+byId('setup').onsubmit=async event=>{
+  event.preventDefault();byId('save').disabled=true;
+  try{if(usbMode)await ensureUsb();const config=await buildConfig();status('보드에 저장 중…');let result;
+    if(usbMode)result=await command('XTOUCH PROVISION '+JSON.stringify(config),20000,r=>!('version' in r));
+    else{const response=await fetch('/provision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config),signal:AbortSignal.timeout(20000)});result=await response.json();if(!response.ok)throw Error(result.error||'저장 실패');}
+    if(result.status!=='ok')throw Error(result.error||'저장 실패');byId('pwd').value='';byId('token').value='';byId('accessCode').value='';status('저장했습니다. 보드가 재시작합니다.\n화면에 + 표시가 나오면 차례로 눌러 터치를 보정하세요.');}
+  catch(error){status(usbMode?usbError(error):error.message);}finally{renderMode();}
+};
+const setupReady=initializeSetup();
+</script></body></html>
